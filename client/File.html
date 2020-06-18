@@ -1,0 +1,44 @@
+<script>
+  import {onMount} from 'svelte'
+  import QR from 'svelte-kjua'
+
+  import {lnurlencode} from './helpers'
+
+  export let params
+  let lnurlpay = lnurlencode(
+    'https://' + location.host + '/~/' + params.file_id
+  )
+  var data
+
+  onMount(async () => {
+    let res = await (await fetch('/~/buy/' + params.file_id)).json()
+    let metadata = JSON.parse(res.metadata)
+    data = {
+      price: parseInt(res.minSendable / 1000),
+      name: metadata.find(([k]) => k === 'text/vnd.filemarket.name')[1],
+      seller: metadata.find(([k]) => k === 'text/vnd.filemarket.seller')[1],
+      description: metadata.find(
+        ([k]) => k === 'text/vnd.filemarket.description'
+      )[1],
+      infohash: metadata.find(([k]) => k === 'application/x-magnet-infohash')[1]
+    }
+  })
+
+  function onClickBuy(e) {
+    e.preventDefault()
+    console.log('buy')
+  }
+</script>
+
+{#if data}
+<h2>{data.name} <small>{data.infohash}</small></h2>
+<p>
+  seller: <em><a href="#/seller/{data.seller}">{data.seller}</a></em>
+</p>
+<article>{data.description}</article>
+<hr />
+<section>
+  <button on:click="{onClickBuy}">buy</button>
+  <QR value="lightning:{lnurlpay}" />
+</section>
+{/if}

@@ -1,0 +1,50 @@
+<!-- @format -->
+
+<script>
+  import {onMount} from 'svelte'
+  import Router, {link} from 'svelte-spa-router'
+
+  import Home from './Home.html'
+  import File from './List.html'
+  import NotFound from './NotFound.html'
+
+  import account from './accountStore'
+
+  const routes = {
+    '/': Home,
+    '/file/:file_id': File,
+    '*': NotFound
+  }
+
+  let lnurlAuth = lnurlencode('https://' + location.host + '/~/auth')
+</script>
+
+<style>
+  header {
+    display: flex;
+    justify-content: space-between;
+  }
+  h1 img {
+    max-width: 120px;
+  }
+</style>
+
+<header>
+  <div>
+    <a href="#/"><img src="/static/icon.png"/></a>
+    <h1>
+      <a href="#/">filemarket</a>
+    </h1>
+  </div>
+  <div>
+    {#if $account.session}
+    <a href="#/seller/{$account.id}">{$account.id}</a>
+    <QR value="{$account.withdraw}">
+    Balance: <b>{$account.balance}</b>
+    {:else}
+    <QR value="{lnurlAuth}" />
+    {/if}
+  </div>
+</header>
+<main><Router {routes} /></main>
+<footer><b>filemarket</b> is a place to sell your files.</footer>
