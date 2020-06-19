@@ -2,19 +2,65 @@ package main
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"time"
 
-	"github.com/fiatjaf/etleneum/types"
 	"github.com/fiatjaf/go-lnurl"
+	cmap "github.com/orcaman/concurrent-map"
 	"gopkg.in/antage/eventsource.v1"
 )
 
 var userstreams = cmap.New()
 
 func authUser(w http.ResponseWriter, r *http.Request) {
+	params := r.URL.Query()
 
+	k1 := params.Get("k1")
+	sig := params.Get("sig")
+	key := params.Get("key")
+
+	if ok, err := lnurl.VerifySignature(k1, sig, key); !ok {
+		log.Debug().Err(err).Str("k1", k1).Str("sig", sig).Str("key", key).
+			Msg("failed to verify lnurl-auth signature")
+		json.NewEncoder(w).Encode(lnurl.ErrorResponse("signature verification failed."))
+		return
+	}
+
+	session := k1
+	log.Debug().Str("session", session).Str("pubkey", key).Msg("valid login")
+
+	// there must be a valid auth session (meaning an eventsource client) otherwise something is wrong
+	ies, ok := userstreams.Get(session)
+	if !ok {
+		json.NewEncoder(w).Encode(lnurl.ErrorResponse("there's no browser session to authorize."))
+		return
+	}
+
+	// get the account id from the pubkey
+	_, err = pg.Exec(`
+INSERT INTO users (id) VALUES ($1)
+ON CONFLICT (id) DO NOTHING
+    `, key)
+	if err != nil {
+		log.Error().Err(err).Str("key", key).Msg("failed to ensure account")
+		json.NewEncoder(w).Encode(lnurl.ErrorResponse("failed to ensure account with key " + key + "."))
+		return
+	}
+
+	// assign the account id to this session on redis
+	if rds.Set("auth-session:"+session, key, time.Hour*24*30).Err() != nil {
+		json.NewEncoder(w).Encode(lnurl.ErrorResponse("failed to save session."))
+		return
+	}
+
+	es := ies.(eventsource.EventSource)
+
+	// send notifications
+	go sendUserNotifications(es, key, session)
+
+	json.NewEncoder(w).Encode(lnurl.OkResponse())
 }
 
 func authUserStream(w http.ResponseWriter, r *http.Request) {
@@ -66,42 +112,42 @@ func authUserStream(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		es.SendRetryMessage(3 * time.Second)
+		es.SendEventMessage(session, "session", "")
 	}()
 
-	accountId := rds.Get("auth-session:" + session).Val()
-	if accountId != "" {
+	key := rds.Get("auth-session:" + session).Val()
+	if key != "" {
 		// we're logged already, so send account information
 		go func() {
 			time.Sleep(100 * time.Millisecond)
-			var acct types.Account
-			err := pg.Get(&acct, `SELECT `+types.ACCOUNTFIELDS+` FROM accounts WHERE id = $1`, accountId)
-			if err != nil {
-				log.Error().Err(err).Str("session", session).Str("id", accountId).
-					Msg("failed to load account from session")
-				return
-			}
-			es.SendEventMessage(`{"account": "`+acct.Id+`", "balance": `+strconv.FormatInt(acct.Balance, 10)+`, "secret": "`+getAccountSecret(acct.Id)+`"}`, "auth", "")
-		}()
-
-		// we're logged already, so send history
-		go func() {
-			time.Sleep(100 * time.Millisecond)
-			notifyHistory(es, accountId)
+			go sendUserNotifications(es, key, session)
 		}()
 
 		// also renew this session
 		rds.Expire("auth-session:"+session, time.Hour*24*30)
 	}
 
-	// always send lnurls because we need lnurl-withdraw even if we're
-	// logged already
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		auth, _ := lnurl.LNURLEncode(s.ServiceURL + "/lnurl/auth?tag=login&k1=" + session)
-		withdraw, _ := lnurl.LNURLEncode(s.ServiceURL + "/lnurl/withdraw?session=" + session)
-
-		es.SendEventMessage(`{"auth": "`+auth+`", "withdraw": "`+withdraw+`"}`, "lnurls", "")
-	}()
-
 	es.ServeHTTP(w, r)
+}
+
+func sendUserNotifications(es eventsource.EventSource, session, key string) {
+	es.SendEventMessage(key, "id", "")
+
+	var walletKey string
+	err := pg.Get(&walletKey, "SELECT wallet_key FROM users WHERE id = $1", key)
+	if err != nil {
+		log.Error().Str("key", key).Err(err).Msg("failed to retrieve user wallet key")
+		return
+	}
+
+	es.SendEventMessage(walletKey, "wallet-key", "")
+
+	details, err := lnp.Wallet(walletKey).Details()
+	if err != nil {
+		log.Error().Str("key", key).Str("wallet_key", walletKey).Err(err).
+			Msg("failed to retrieve lnpay user wallet info")
+		return
+	}
+
+	es.SendEventMessage(strconv.FormatInt(details.Balance, 10), "balance", "")
 }

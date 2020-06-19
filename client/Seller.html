@@ -1,0 +1,61 @@
+<script>
+  import {onMount} from 'svelte'
+
+  import FilesTable from './components/FilesTable.html'
+  import account from './accountStore'
+
+  export let params
+
+  var files = []
+  onMount(async () => {
+    files = await (await fetch('/~/list?seller=' + params.seller_id)).json()
+  })
+
+  var fileField
+  var name
+  var description
+  var price_sat
+  async function addFile() {
+    let formData = new window.FormData()
+    formData.append('name', name)
+    formData.append('description', description)
+    formData.append('price', price_sat * 1000)
+    formData.append('file', fileField.files[0])
+
+    let res = await (
+      await fetch('/~/add?session=' + $account.session, {
+        method: 'POST',
+        body: formData
+      })
+    ).json()
+
+    console.log(res)
+  }
+</script>
+
+{#if $account.id === params.seller_id}
+<form on:submit="{addFile}">
+  <label>
+    .torrent file
+    <input type="file" bind:this="{fileField}" />
+  </label>
+  <label>
+    Price (satoshis)
+    <input type="number" min="1" bind:value="{price_sat}" />
+  </label>
+  <label>
+    Display name
+    <input type="text" bind:value="{name}" />
+  </label>
+  <label>
+    Brief description
+    <textarea bind:value="{description}" />
+  </label>
+  <button
+    disabled="{!(fileField.files.length && price_sat && name.length && description.length)}"
+  >
+    Add file for sale
+  </button>
+</form>
+{/if}
+<FilesTable files="{files}" />

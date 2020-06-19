@@ -2,30 +2,82 @@
 
 <script>
   import {onMount} from 'svelte'
-  import Router, {link} from 'svelte-spa-router'
+  import Router from 'svelte-spa-router'
+  import QR from 'svelte-kjua'
 
   import Home from './Home.html'
-  import File from './List.html'
+  import File from './File.html'
+  import Seller from './Seller.html'
   import NotFound from './NotFound.html'
+  import * as toast from './toast'
 
   import account from './accountStore'
+  import {lnurlencode} from './helpers'
 
   const routes = {
     '/': Home,
     '/file/:file_id': File,
+    '/seller/:seller_id': Seller,
     '*': NotFound
   }
 
-  let lnurlAuth = lnurlencode('https://' + location.host + '/~/auth')
+  let lnurlAuth = lnurlencode(
+    `https://${location.host}/~/auth?k1=${$account.session}&tag=login`
+  )
+
+  var awaitingSeedAuth = false
+  var popupBlocked = false
+  async function loginSeedAuth(e) {
+    if (popupBlocked) {
+      return
+    } else {
+      e.preventDefault()
+    }
+
+    awaitingSeedAuth = true
+    try {
+      await PromiseWindow.open(`${SEEDAUTH}/#/lnurl/${$account.lnurl.auth}`, {
+        windowName: 'Login to etleneum.com',
+        height: 500,
+        width: 400
+      })
+    } catch (err) {
+      if (err !== 'closed') {
+        if (err === 'blocked') {
+          popupBlocked = true
+        }
+        toast.warning(`${err}`)
+        console.log(err)
+      }
+    }
+
+    awaitingSeedAuth = false
+  }
 </script>
 
 <style>
   header {
     display: flex;
     justify-content: space-between;
+    align-items: center;
   }
-  h1 img {
+  header img {
     max-width: 120px;
+  }
+  #account {
+    max-width: 200px;
+    text-align: center;
+  }
+  .awaiting-seed-auth {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
+  .awaiting-seed-auth img {
+    width: 80%;
+  }
+  footer {
+    margin-top: 100px;
   }
 </style>
 
@@ -36,13 +88,38 @@
       <a href="#/">filemarket</a>
     </h1>
   </div>
-  <div>
-    {#if $account.session}
+  <div id="account">
+    {#if $account.id}
     <a href="#/seller/{$account.id}">{$account.id}</a>
-    <QR value="{$account.withdraw}">
-    Balance: <b>{$account.balance}</b>
+    {#if $account.balance > 0}
+    <div>
+      <a href="lightning:{$account.withdraw}">
+        <QR size="100" value="lightning:{$account.withdraw}" />
+      </a>
+      <span>Balance: <b>{$account.balance}</b></span>
+    </div>
+    {/if} {:else if awaitingSeedAuth}
+    <div class="awaiting-seed-auth">
+      <img src="/static/rings.svg" />
+      Waiting for login on popup
+    </div>
     {:else}
-    <QR value="{lnurlAuth}" />
+    <a href="lightning:{lnurlAuth}">
+      <QR size="100" value="lightning:{lnurlAuth}" />
+    </a>
+    <span
+      >Scan with
+      <a href="https://github.com/fiatjaf/awesome-lnurl#wallets" target="_blank"
+        >a wallet that supports lnurl-auth</a
+      >
+      or
+      <a
+        on:click="{loginSeedAuth}"
+        href="https://seed-auth.etleneum.com/#/lnurl/{lnurlAuth}"
+        target="_blank"
+        >login with username and password</a
+      >.
+    </span>
     {/if}
   </div>
 </header>

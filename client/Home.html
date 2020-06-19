@@ -1,33 +1,32 @@
 <script>
   import {onMount} from 'svelte'
+  import {push} from 'svelte-spa-router'
   import QR from 'svelte-kjua'
 
-  var files = []
+  import FilesTable from './components/FilesTable.html'
+  import account from './accountStore'
 
+  var files = []
   onMount(async () => {
     files = await (await fetch('/~/list')).json()
   })
+
+  function goToSeller(e) {
+    e.preventDefault()
+    push('/seller/' + $account.id)
+  }
 </script>
 
 <div>
-  <table>
-    <thead>
-      <tr>
-        <th>file</th>
-        <th>seller</th>
-        <th>price (sat)</th>
-        <th>buys (#)</th>
-      </tr>
-    </thead>
-    <tbody>
-      {#each files as file}
-      <tr>
-        <td><a href="#/file/{file.id}">{file.metadata.name}</a></td>
-        <td><a href="#/seller/{file.seller}">{file.seller}</a></td>
-        <td>{parseInt(file.price_msat / 1000)}sat</td>
-        <td>{file.nsales}</td>
-      </tr>
-      {/each}
-    </tbody>
-  </table>
+  <div>
+    <button disabled="{!$account.id}" on:click="{goToSeller}">
+      Sell file
+    </button>
+    {#if !$account.id}
+    <small>
+      Login first.
+    </small>
+    {/if}
+  </div>
+  <FilesTable files="{files}" />
 </div>

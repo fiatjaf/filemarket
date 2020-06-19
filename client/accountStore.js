@@ -47,7 +47,7 @@ function startEventSource() {
   )
   es.onerror = e => console.log('accountstore sse error', e.data)
 
-  es.addEventListener('auth', e => {
+  es.addEventListener('session', e => {
     let session = e.data
     window.localStorage.setItem('auth-session', session)
     current = {...current, session}

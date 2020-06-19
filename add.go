@@ -11,6 +11,13 @@ import (
 )
 
 func addFile(w http.ResponseWriter, r *http.Request) {
+	session := r.URL.Query().Get("session")
+	user := rds.Get("auth-session:" + session).Val()
+	if user == "" {
+		w.WriteHeader(401)
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 1000000)
 	err := r.ParseMultipartForm(1000000)
 	if err != nil {
@@ -24,14 +31,7 @@ func addFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	session, err := store.Get(r, "auth")
-	if err != nil {
-		w.WriteHeader(500)
-		return
-	}
-
 	name := r.FormValue("name")
-	user, _ := session.Values["user"].(string)
 	price, _ := strconv.Atoi(r.FormValue("price"))
 	description := r.FormValue("description")
 	fileId := cuid.Slug()

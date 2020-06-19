@@ -12,6 +12,7 @@ import (
 	"github.com/gorilla/sessions"
 	"github.com/jmoiron/sqlx"
 	"github.com/kelseyhightower/envconfig"
+	_ "github.com/lib/pq"
 	"github.com/rs/zerolog"
 	"gopkg.in/redis.v5"
 )
@@ -35,7 +36,7 @@ type Settings struct {
 	ServiceURL         string `envconfig:"SERVICE_URL" required:"true"`
 	PostgresURL        string `envconfig:"POSTGRES_URL" required:"true"`
 	RedisURL           string `envconfig:"REDIS_URL" required:"true"`
-	LNPayKey           string `envconfig:"LN_PAY_KEY" required:"true"`
+	LNPayKey           string `envconfig:"LNPAY_KEY" required:"true"`
 	LNPayWalletPending string `envconfig:"LNPAY_WALLET_PENDING" required:"true"`
 	LNPayWebhookSecret string `envconfig:"LNPAY_WEBHOOK_SECRET" required:"true"`
 }
