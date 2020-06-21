@@ -18,9 +18,9 @@ func listFiles(w http.ResponseWriter, r *http.Request) {
 
 	var files []File
 	err := pg.Select(&files, `
-SELECT id, seller, price_msat, metadata, magnet, nsales
+SELECT `+FILEFIELDS+`, coalesce(nsales, 0) AS nsales
 FROM files
-INNER JOIN (
+LEFT OUTER JOIN (
   SELECT file_id, count(*) AS nsales
   FROM sales
   GROUP BY file_id
@@ -28,7 +28,7 @@ INNER JOIN (
 `+filter+`
 ORDER BY nsales DESC
     `, args...)
-	if err != nil || err != sql.ErrNoRows {
+	if err != nil && err != sql.ErrNoRows {
 		log.Error().Err(err).Msg("database error when listing files")
 		return
 	}

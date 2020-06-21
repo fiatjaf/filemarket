@@ -1,20 +1,42 @@
 <script>
   import {onMount} from 'svelte'
   import QR from 'svelte-kjua'
+  import {push} from 'svelte-spa-router'
 
-  import {lnurlencode} from './helpers'
+  import {shorten, lnurlencode} from './helpers'
+  import account from './accountStore'
+  import sales from './salesStore'
 
   export let params
-  let lnurlpay = lnurlencode(
-    'https://' + location.host + '/~/' + params.file_id
-  )
   var data
+  var hostMagnet
+
+  $: lnurlpay = lnurlencode(
+    'https://' +
+      location.host +
+      '/~/buy/' +
+      params.file_id +
+      '?session=' +
+      $account.session
+  )
+
+  $: boughtAlready = Object.keys($sales).find(
+    id => $sales[id].file_id == params.file_id
+  )
+
+  function goToSale(e) {
+    e.preventDefault()
+    push(`#/sale/${boughtAlready}`)
+  }
 
   onMount(async () => {
     let res = await (await fetch('/~/buy/' + params.file_id)).json()
     let metadata = JSON.parse(res.metadata)
     data = {
+      id: params.file_id,
+      callback: res.callback,
       price: parseInt(res.minSendable / 1000),
+      raw_metadata: res.metadata,
       name: metadata.find(([k]) => k === 'text/vnd.filemarket.name')[1],
       seller: metadata.find(([k]) => k === 'text/vnd.filemarket.seller')[1],
       description: metadata.find(
@@ -22,23 +44,115 @@
       )[1],
       infohash: metadata.find(([k]) => k === 'application/x-magnet-infohash')[1]
     }
+
+    var unsub
+    unsub = account.subscribe(async a => {
+      if (a.id === data.seller) {
+        setTimeout(unsub, 1)
+        hostMagnet = await (
+          await fetch(`/~/host/${data.id}?session=${$account.session}`)
+        ).json()
+      }
+    })
+
+    return unsub
   })
 
-  function onClickBuy(e) {
+  var invoice
+  async function onClickBuy(e) {
     e.preventDefault()
-    console.log('buy')
+
+    let u = new URL(data.callback)
+    let qs = new URLSearchParams(u.search)
+    qs.set('amount', parseInt(data.price * 1000))
+    qs.set('session', $account.session)
+    u.search = qs.toString()
+    let callback = u.toString()
+    let res = await (await fetch(callback)).json()
+
+    invoice = res.pr
   }
 </script>
 
+<style>
+  section {
+    display: flex;
+    justify-content: space-evenly;
+    flex-wrap: wrap;
+    align-content: center;
+    align-items: center;
+  }
+  section > * {
+    margin: 20px;
+  }
+  #invoice label {
+    display: block;
+    width: 200px;
+    margin: auto;
+  }
+  textarea {
+    white-space: pre-wrap;
+    font-size: 10px;
+    padding: 4px;
+    background: #f2af81;
+  }
+</style>
+
 {#if data}
-<h2>{data.name} <small>{data.infohash}</small></h2>
-<p>
-  seller: <em><a href="#/seller/{data.seller}">{data.seller}</a></em>
-</p>
-<article>{data.description}</article>
-<hr />
-<section>
-  <button on:click="{onClickBuy}">buy</button>
-  <a href="lightning:{lnurlpay}"><QR value="lightning:{lnurlpay}"/></a>
-</section>
+<div>
+  <h2>File</h2>
+  <dl>
+    <dt>File</dt>
+    <dd><b>{data.name}</b></dd>
+    <dt>Code</dt>
+    <dd><code>{data.infohash}</code></dd>
+    <dt>Seller</dt>
+    <dd>
+      <em><a href="#/seller/{data.seller}">{shorten(data.seller)}</a></em>
+    </dd>
+  </dl>
+  <article>{data.description}</article>
+  <hr />
+  {#if data.seller == $account.id}
+  <p>
+    You're selling this file.
+  </p>
+  <p>Use <a href="{hostMagnet}">this magnet link</a> to seed it.</p>
+  <p>
+    Point potential buyers to this page or to
+    <a href="lightning:{lnurlpay}">this lnurl address</a>.
+  </p>
+  {:else if boughtAlready}
+  <p>
+    You have bought this file already.
+    <button on:click="{goToSale}">Get magnet</button>
+  </p>
+  {:else}
+  <section>
+    <div id="invoice">
+      {#if invoice}
+      <a href="lightning:{invoice}">
+        <QR size="200" value="lightning:{invoice}" />
+      </a>
+      <label> Invoice: <textarea readonly value="{invoice}" /> </label>
+      <label>
+        Unhashed description:
+        <textarea readonly value="{data.raw_metadata}" />
+      </label>
+      {:else}
+      <button on:click="{onClickBuy}">Generate invoice to pay here</button>
+      {/if}
+    </div>
+    <div>
+      <a href="lightning:{lnurlpay}">
+        <QR size="200" value="lightning:{lnurlpay}" />
+      </a>
+      Or scan with
+      <a href="https://github.com/fiatjaf/awesome-lnurl#wallets" target="_blank"
+        >a wallet that supports lnurl-pay</a
+      >.
+    </div>
+  </section>
+  {/if}
+</div>
 {/if}

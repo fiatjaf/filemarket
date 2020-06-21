@@ -7,3 +7,7 @@ export function lnurlencode(url) {
     1500
   )
 }
+
+export function shorten(id) {
+  return id.slice(0, 4) + '…' + id.slice(-3)
+}

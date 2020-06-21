@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"net"
@@ -28,7 +29,7 @@ type AnnounceRequest struct {
 }
 
 type AnnounceResponse struct {
-	Complete   int64                  `bencode:"incomplete"`
+	Complete   int64                  `bencode:"complete"`
 	Incomplete int64                  `bencode:"incomplete"`
 	Interval   int64                  `bencode:"interval"`
 	Peers      []AnnounceResponsePeer `bencode:"peers"`
@@ -51,31 +52,13 @@ func handleAnnounce(w http.ResponseWriter, r *http.Request) {
 
 	ann, err := parseAnnounce(r)
 	if err != nil {
+		log.Warn().Err(err).Str("url", r.URL.String()).Msg("failed to parse announce")
 		trackerError(w, err)
 		return
 	}
 
 	pretty.Log(key)
 	pretty.Log(ann)
-
-	// is this the seller?
-	spl := strings.Split(key, ":")
-	var saleId = spl[0]
-	var sellerHash string
-	if len(spl) == 2 {
-		sellerHash = spl[1]
-	}
-
-	// this represents a real purchase?
-	var sellerId string
-	err = pg.Get(&sellerId, `
-SELECT seller FROM sales
-WHERE id = $1 AND status = 'pending'
-    `, saleId)
-	if err != nil {
-		trackerError(w, err)
-		return
-	}
 
 	// build the announcement response
 	resp := AnnounceResponse{
@@ -85,23 +68,57 @@ WHERE id = $1 AND status = 'pending'
 		Peers:      []AnnounceResponsePeer{},
 	}
 
-	// is this the seller?
-	if makeSellerHash(saleId, sellerId) == sellerHash {
-		// track the seller online
+	spl := strings.Split(key, ":")
+	var id = spl[0] // can be either a saleId or a fileId
+	var sellerHash string
+	if len(spl) == 2 {
+		sellerHash = spl[1]
+	}
+
+	var file File
+	err = pg.Get(&file, `
+SELECT `+FILEFIELDS+`
+FROM files
+WHERE id = $1
+   OR id = (SELECT file_id FROM sales WHERE id = $1)
+    `, id)
+	if err != nil {
+		if err != sql.ErrNoRows {
+			log.Error().Err(err).Msg("database error on /announce")
+		}
+		trackerError(w, err)
+		return
+	}
+	// if we don't end above that means we have the key
+	// to be either the seller or the buyer
+
+	// is this the seller? key == fileId + hash(sellerId, secret)
+	if makeSellerHash(file.Seller) == sellerHash {
+		// this is the seller
+		// track that he is online and store a peer object to serve later to the buyer
 		peerj, _ := json.Marshal(AnnounceResponsePeer{
 			PeerId: string(ann.PeerId[:]),
 			IP:     ann.IP.String(),
 			Port:   ann.Port,
 		})
-		err := rds.Set("fm:online:"+sellerId, string(peerj), time.Minute*30).Err()
+		err := rds.Set("fm:online:"+file.Seller, string(peerj), time.Minute*30).Err()
 		if err != nil {
-			log.Error().Err(err).Str("seller", sellerId).
+			log.Error().Err(err).Str("seller", file.Seller).
 				Msg("failed to save online presence")
 		}
-		return
+
+		// also store the fact that the seller was online today
+		daysPresenceKey := "fm:seed:" + file.Id
+		err = rds.HSet(daysPresenceKey, time.Now().Format("20060102"), "t").Err()
+		if err != nil {
+			log.Error().Err(err).Str("seller", file.Seller).Str("file", file.Id).
+				Msg("failed to save seller online day")
+		}
+		rds.Expire(daysPresenceKey, time.Hour*24*90)
 	} else {
-		// is the seller is online?
-		if peerj, err := rds.Get("fm:online:" + sellerId).Result(); err == nil {
+		// this is the buyer
+		// if the seller is online, tell that to the buyer
+		if peerj, err := rds.Get("fm:online:" + file.Seller).Result(); err == nil {
 			// add the seller to the announcement response
 			var peer AnnounceResponsePeer
 			json.Unmarshal([]byte(peerj), &peer)
@@ -110,6 +127,8 @@ WHERE id = $1 AND status = 'pending'
 			resp.Peers = append(resp.Peers, peer)
 		}
 	}
+
+	pretty.Log(resp)
 
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	bencode.NewEncoder(w).Encode(resp)
@@ -169,7 +188,10 @@ func parseAnnounce(r *http.Request) (ann *AnnounceRequest, err error) {
 	if ann.IP == nil {
 		ann.IP = net.ParseIP(r.Header.Get("X-Forwarded-For"))
 		if ann.IP == nil {
-			ann.IP = net.ParseIP(r.RemoteAddr)
+			spl := strings.Split(r.RemoteAddr, ":")
+			remoteIP := strings.Join(spl[0:len(spl)-1], ":")
+			remoteIP = strings.Trim(remoteIP, "[]")
+			ann.IP = net.ParseIP(remoteIP)
 		}
 	}
 
@@ -181,7 +203,7 @@ func parseBinaryParam(s string) (buf [20]byte) {
 	return buf
 }
 
-func makeSellerHash(saleId, sellerId string) string {
-	h := sha256.Sum256([]byte(saleId + ":" + sellerId + ":" + s.SecretKey))
+func makeSellerHash(sellerId string) string {
+	h := sha256.Sum256([]byte(sellerId + ":" + s.SecretKey))
 	return hex.EncodeToString(h[:])
 }

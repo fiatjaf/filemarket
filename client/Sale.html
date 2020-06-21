@@ -1,0 +1,16 @@
+<script>
+  import sales from './salesStore'
+  import NotFound from './NotFound.html'
+
+  export let params
+
+  let sale = $sales[params.sale_id]
+</script>
+
+{#if sale}
+<div>
+  {JSON.stringify(sale, null, 2)}
+</div>
+{:else}
+<NotFound />
+{/if}

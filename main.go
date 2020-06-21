@@ -90,11 +90,11 @@ func main() {
 	router.Path("/~/webhook/receive/" + s.LNPayWebhookSecret).Methods("POST").
 		HandlerFunc(receivePaymentWebhook)
 	router.Path("/~/auth").Methods("GET").HandlerFunc(authUser)
-	router.Path("/~~~/auth").Methods("GET").HandlerFunc(authUserStream)
+	router.Path("/~~~/auth").Methods("GET").HandlerFunc(userStream)
 	router.Path("/~/list").Methods("GET").HandlerFunc(listFiles)
 	router.Path("/~/add").Methods("POST").HandlerFunc(addFile)
-	router.Path("/~/{file}").Methods("GET").HandlerFunc(buyFile)
-	router.Path("/~~~/{file}").Methods("GET").HandlerFunc(buyFileStream)
+	router.Path("/~/host/{file}").Methods("GET").HandlerFunc(hostFile)
+	router.Path("/~/buy/{file}").Methods("GET").HandlerFunc(buyFile)
 	router.Path("/~/{key}/announce").Methods("GET").HandlerFunc(handleAnnounce)
 	router.PathPrefix("/").Methods("GET").HandlerFunc(serveClient)
 

@@ -8,16 +8,18 @@
   import Home from './Home.html'
   import File from './File.html'
   import Seller from './Seller.html'
+  import Sale from './Sale.html'
   import NotFound from './NotFound.html'
   import * as toast from './toast'
 
   import account from './accountStore'
-  import {lnurlencode} from './helpers'
+  import {shorten, lnurlencode} from './helpers'
 
   const routes = {
     '/': Home,
     '/file/:file_id': File,
     '/seller/:seller_id': Seller,
+    '/sale/:sale_id': Sale,
     '*': NotFound
   }
 
@@ -60,13 +62,27 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-wrap: wrap;
   }
   header img {
     max-width: 120px;
   }
+  #logo {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+  }
   #account {
-    max-width: 200px;
+    margin-left: 20px;
     text-align: center;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+  }
+  #account span {
+    max-width: 200px;
   }
   .awaiting-seed-auth {
     display: flex;
@@ -76,13 +92,17 @@
   .awaiting-seed-auth img {
     width: 80%;
   }
+  .logout {
+    text-decoration: underline;
+    cursor: pointer;
+  }
   footer {
-    margin-top: 100px;
+    margin-top: 200px;
   }
 </style>
 
 <header>
-  <div>
+  <div id="logo">
     <a href="#/"><img src="/static/icon.png"/></a>
     <h1>
       <a href="#/">filemarket</a>
@@ -90,11 +110,15 @@
   </div>
   <div id="account">
     {#if $account.id}
-    <a href="#/seller/{$account.id}">{$account.id}</a>
+    <a href="#/seller/{$account.id}">{shorten($account.id)}</a>
+    &nbsp;
+    <small>
+      (<span class="logout" on:click="{account.reset}">logout</span>)
+    </small>
     {#if $account.balance > 0}
     <div>
       <a href="lightning:{$account.withdraw}">
-        <QR size="100" value="lightning:{$account.withdraw}" />
+        <QR size="200" value="lightning:{$account.withdraw}" />
       </a>
       <span>Balance: <b>{$account.balance}</b></span>
     </div>
@@ -105,7 +129,7 @@
     </div>
     {:else}
     <a href="lightning:{lnurlAuth}">
-      <QR size="100" value="lightning:{lnurlAuth}" />
+      <QR size="200" value="lightning:{lnurlAuth}" />
     </a>
     <span
       >Scan with

@@ -1,16 +1,16 @@
 package main
 
 import (
-	"encoding/hex"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"strconv"
 
-	"github.com/anacrolix/torrent/metainfo"
 	"github.com/fiatjaf/go-lnurl"
 	"github.com/fiatjaf/lnpay-go"
 	"github.com/gorilla/mux"
+	"gopkg.in/antage/eventsource.v1"
 )
 
 func buyFile(w http.ResponseWriter, r *http.Request) {
@@ -18,9 +18,12 @@ func buyFile(w http.ResponseWriter, r *http.Request) {
 	qs := r.URL.Query()
 	msatoshi, _ := strconv.ParseInt(qs.Get("amount"), 10, 64)
 
+	// optional, used to mix the lnurlpay flow with the client
+	session := qs.Get("session")
+
 	var file File
 	err := pg.Get(&file, `
-SELECT id, seller, price_msat, metadata, magnet
+SELECT `+FILEFIELDS+`
 FROM files
 WHERE id = $1
     `, file_id)
@@ -29,63 +32,56 @@ WHERE id = $1
 		return
 	}
 
-	magnet, err := metainfo.ParseMagnetURI(file.Magnet)
-	if err != nil {
-		json.NewEncoder(w).Encode(lnurl.ErrorResponse("Magnet is broken."))
-		return
-	}
-
-	var m Metadata
-	err = json.Unmarshal(file.Metadata, &m)
-	if err != nil {
-		json.NewEncoder(w).Encode(lnurl.ErrorResponse("Bug in the database record."))
-		return
-	}
-
 	if msatoshi == 0 {
 		// first lnurlpay call
+		if ies, ok := userstreams.Get(session); ok {
+			ies.(eventsource.EventSource).SendEventMessage(
+				"Got lnurlpay call for file "+file_id, "message", "")
+		}
+
 		json.NewEncoder(w).Encode(lnurl.LNURLPayResponse1{
+			Callback:        s.ServiceURL + "/~/buy/" + file_id + "?session=" + session,
 			Tag:             "payRequest",
-			Callback:        s.ServiceURL + "/~/" + file_id,
 			MaxSendable:     file.PriceMsat,
 			MinSendable:     file.PriceMsat,
-			EncodedMetadata: string(makeMetadata(file.Seller, m, magnet)),
+			EncodedMetadata: string(file.MakeMetadata()),
 		})
 	} else {
 		// second lnurlpay call
+		h := sha256.Sum256(file.MakeMetadata())
+
 		lntx, err := lnpending.Invoice(lnpay.InvoiceParams{
-			NumSatoshis:     file.PriceMsat * 1000,
-			DescriptionHash: hex.EncodeToString(makeMetadata(file.Seller, m, magnet)),
-			PassThru:        map[string]interface{}{"file_id": file.Id},
+			NumSatoshis:     file.PriceMsat / 1000,
+			DescriptionHash: base64.StdEncoding.EncodeToString(h[:]),
+			PassThru: map[string]interface{}{
+				"file_id": file.Id,
+				"session": session,
+			},
 		})
 		if err != nil {
-			json.NewEncoder(w).Encode(lnurl.ErrorResponse("Failed to generate invoice."))
+			log.Error().Err(err).Msg("failed to generate lnpay invoice")
+			json.NewEncoder(w).Encode(
+				lnurl.ErrorResponse("Failed to generate invoice."))
+			return
+		}
+
+		if ies, ok := userstreams.Get(session); ok {
+			ies.(eventsource.EventSource).SendEventMessage(
+				"Sending invoice for file "+file_id+" to wallet.", "message", "")
+		}
+
+		magstr, err := file.BuyerMagnet(lntx.ID[5:])
+		if err != nil {
+			json.NewEncoder(w).Encode(
+				lnurl.ErrorResponse("Failed to compute magnet."))
 			return
 		}
 
 		json.NewEncoder(w).Encode(lnurl.LNURLPayResponse2{
-			Routes:     make([][]lnurl.RouteInfo, 0),
-			PR:         lntx.PaymentRequest,
-			Disposable: lnurl.TRUE,
-			SuccessAction: lnurl.Action(
-				"Your torrent URL:",
-				s.ServiceURL+"/~/"+lntx.ID[5:]+"/announce",
-			),
+			Routes:        make([][]lnurl.RouteInfo, 0),
+			PR:            lntx.PaymentRequest,
+			Disposable:    lnurl.TRUE,
+			SuccessAction: lnurl.Action(magstr, ""),
 		})
 	}
-}
-
-func buyFileStream(w http.ResponseWriter, r *http.Request) {
-
-}
-
-func makeMetadata(seller string, m Metadata, magnet metainfo.Magnet) []byte {
-	j, _ := json.Marshal([][]string{
-		{"text/plain", fmt.Sprintf("File '%s' from user %s", m.Name, seller)},
-		{"text/vnd.filemarket.name", m.Name},
-		{"text/vnd.filemarket.seller", seller},
-		{"text/vnd.filemarket.description", m.Description},
-		{"application/x-magnet-infohash", hex.EncodeToString(magnet.InfoHash[:])},
-	})
-	return j
 }

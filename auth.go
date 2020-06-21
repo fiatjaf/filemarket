@@ -1,6 +1,7 @@
 package main
 
 import (
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"net/http"
@@ -50,7 +51,7 @@ ON CONFLICT (id) DO NOTHING
 	}
 
 	// assign the account id to this session on redis
-	if rds.Set("auth-session:"+session, key, time.Hour*24*30).Err() != nil {
+	if rds.Set("fm:auth-session:"+session, key, time.Hour*24*30).Err() != nil {
 		json.NewEncoder(w).Encode(lnurl.ErrorResponse("failed to save session."))
 		return
 	}
@@ -63,7 +64,7 @@ ON CONFLICT (id) DO NOTHING
 	json.NewEncoder(w).Encode(lnurl.OkResponse())
 }
 
-func authUserStream(w http.ResponseWriter, r *http.Request) {
+func userStream(w http.ResponseWriter, r *http.Request) {
 	var es eventsource.EventSource
 	session := r.URL.Query().Get("session")
 
@@ -115,7 +116,7 @@ func authUserStream(w http.ResponseWriter, r *http.Request) {
 		es.SendEventMessage(session, "session", "")
 	}()
 
-	key := rds.Get("auth-session:" + session).Val()
+	key := rds.Get("fm:auth-session:" + session).Val()
 	if key != "" {
 		// we're logged already, so send account information
 		go func() {
@@ -124,19 +125,26 @@ func authUserStream(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		// also renew this session
-		rds.Expire("auth-session:"+session, time.Hour*24*30)
+		rds.Expire("fm:auth-session:"+session, time.Hour*24*30)
 	}
 
 	es.ServeHTTP(w, r)
 }
 
-func sendUserNotifications(es eventsource.EventSource, session, key string) {
+func sendUserNotifications(es eventsource.EventSource, key, session string) {
 	es.SendEventMessage(key, "id", "")
 
 	var walletKey string
-	err := pg.Get(&walletKey, "SELECT wallet_key FROM users WHERE id = $1", key)
+	err := pg.Get(&walletKey, `
+SELECT wallet_key
+FROM users
+WHERE id = $1 AND wallet_key IS NOT NULL
+    `, key)
 	if err != nil {
-		log.Error().Str("key", key).Err(err).Msg("failed to retrieve user wallet key")
+		if err != sql.ErrNoRows {
+			log.Error().Str("key", key).Err(err).
+				Msg("failed to retrieve user wallet key")
+		}
 		return
 	}
 

@@ -3,5 +3,9 @@
 }
 
 body {
-  margin: 20px 40px;
+  margin: 20px 80px;
+}
+
+hr {
+  margin: 20px 0;
 }

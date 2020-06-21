@@ -1,21 +1,24 @@
 import {readable} from 'svelte/store'
 
+import sales from './salesStore'
 import * as toast from './toast'
 import {lnurlencode} from './helpers'
 
-const initial = {
-  id: null,
-  withdraw: null,
-  session: window.localStorage.getItem('auth-session') || null,
-  balance: 0,
-  files: []
+function getInitial() {
+  return {
+    id: null,
+    withdraw: null,
+    session: localStorage.getItem('auth-session') || null,
+    balance: 0,
+    files: []
+  }
 }
 
-var current = {...initial}
+var current = getInitial()
 var es
 var storeSet = () => {}
 
-const account = readable(initial, set => {
+const account = readable(current, set => {
   storeSet = set
   startEventSource()
 
@@ -27,16 +30,13 @@ const account = readable(initial, set => {
 export default account
 
 account.reset = function() {
-  window.localStorage.removeItem('auth-session')
-  current = {...initial}
-  storeSet(current)
-
   if (es) {
     es.close()
-    window.localStorage.removeItem('auth-session')
-    current = {...initial}
-    storeSet(current)
   }
+
+  localStorage.removeItem('auth-session')
+  current = getInitial()
+  storeSet(current)
 
   startEventSource()
 }
@@ -49,9 +49,21 @@ function startEventSource() {
 
   es.addEventListener('session', e => {
     let session = e.data
-    window.localStorage.setItem('auth-session', session)
+    localStorage.setItem('auth-session', session)
     current = {...current, session}
     storeSet(current)
+  })
+  es.addEventListener('message', e => {
+    toast.info(e.data)
+  })
+  es.addEventListener('buy', e => {
+    let [saleId, magnet, fileId, fileName] = JSON.parse(e.data)
+    sales.update(saleId, sale => {
+      sale.magnet = magnet
+      sale.file_id = fileId
+      sale.file_name = fileName
+      return sale
+    })
   })
   es.addEventListener('id', e => {
     let id = e.data

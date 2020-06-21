@@ -3,29 +3,57 @@
   import {push} from 'svelte-spa-router'
   import QR from 'svelte-kjua'
 
-  import FilesTable from './components/FilesTable.html'
+  import sales from './salesStore'
   import account from './accountStore'
+  import FilesTable from './components/FilesTable.html'
 
   var files = []
   onMount(async () => {
     files = await (await fetch('/~/list')).json()
   })
 
-  function goToSeller(e) {
+  $: buys = Object.keys($sales).map(id => ({id, ...$sales[id]}))
+
+  function goAdd(e) {
     e.preventDefault()
-    push('/seller/' + $account.id)
+    push('/seller/' + $account.id + '?add')
   }
 </script>
 
+<style>
+  #buys {
+    display: flex;
+    flex-wrap: wrap;
+  }
+  details {
+    margin: 0 10px;
+  }
+</style>
+
 <div>
   <div>
-    <button disabled="{!$account.id}" on:click="{goToSeller}">
+    <button disabled="{!$account.id}" on:click="{goAdd}">
       Sell file
     </button>
     {#if !$account.id}
     <small>
       Login first.
     </small>
+    {/if}
+  </div>
+  <div>
+    {#if buys.length}
+    <h2>Files bought</h2>
+    <small>(store locally)</small>
+    <div id="buys">
+      {#each buys as buy}
+      <details>
+        <summary>{buy.file_name}</summary>
+        <p><a href="#/file/{buy.file_id}">{buy.file_id}</a></p>
+        <p><a href="{buy.magnet}">{buy.magnet}</a></p>
+      </details>
+      {/each}
+    </div>
     {/if}
   </div>
   <FilesTable files="{files}" />

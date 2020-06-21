@@ -1,4 +1,6 @@
 <script>
+  import {shorten} from '../helpers'
+
   export let files = []
 </script>
 
@@ -7,7 +9,7 @@
     <tr>
       <th>file</th>
       <th>seller</th>
-      <th>price (sat)</th>
+      <th>price</th>
       <th>buys (#)</th>
     </tr>
   </thead>
@@ -15,8 +17,8 @@
     {#each files as file}
     <tr>
       <td><a href="#/file/{file.id}">{file.metadata.name}</a></td>
-      <td><a href="#/seller/{file.seller}">{file.seller}</a></td>
-      <td>{parseInt(file.price_msat / 1000)}sat</td>
+      <td><a href="#/seller/{file.seller}">{shorten(file.seller)}</a></td>
+      <td>{parseInt(file.price_msat / 1000)} sat</td>
       <td>{file.nsales}</td>
     </tr>
     {/each}
