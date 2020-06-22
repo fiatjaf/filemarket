@@ -42,20 +42,8 @@
       description: metadata.find(
         ([k]) => k === 'text/vnd.filemarket.description'
       )[1],
-      infohash: metadata.find(([k]) => k === 'application/x-magnet-infohash')[1]
+      infohash: metadata.find(([k]) => k === 'application/x-infohash')[1]
     }
-
-    var unsub
-    unsub = account.subscribe(async a => {
-      if (a.id === data.seller) {
-        setTimeout(unsub, 1)
-        hostMagnet = await (
-          await fetch(`/~/host/${data.id}?session=${$account.session}`)
-        ).json()
-      }
-    })
-
-    return unsub
   })
 
   var invoice
@@ -115,9 +103,18 @@
   <hr />
   {#if data.seller == $account.id}
   <p>
-    You're selling this file.
+    You are selling this file.
   </p>
-  <p>Use <a href="{hostMagnet}">this magnet link</a> to seed it.</p>
+  <p>
+    Use
+    <a
+      href="/~/host/{data.id}.torrent?session={$account.session}"
+      target="_blank"
+    >
+      this torrent file
+    </a>
+    to seed it.
+  </p>
   <p>
     Point potential buyers to this page or to
     <a href="lightning:{lnurlpay}">this lnurl address</a>.

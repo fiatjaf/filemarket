@@ -7,8 +7,8 @@ CREATE TABLE files (
   id text PRIMARY KEY,
   seller text NOT NULL REFERENCES users(id),
   price_msat numeric(13) NOT NULL,
-  magnet text NOT NULL,
-  metadata jsonb NOT NULL
+  metadata jsonb NOT NULL,
+  torrent bytea NOT NULL
 );
 
 CREATE TABLE sales (

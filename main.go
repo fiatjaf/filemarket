@@ -93,7 +93,7 @@ func main() {
 	router.Path("/~~~/auth").Methods("GET").HandlerFunc(userStream)
 	router.Path("/~/list").Methods("GET").HandlerFunc(listFiles)
 	router.Path("/~/add").Methods("POST").HandlerFunc(addFile)
-	router.Path("/~/host/{file}").Methods("GET").HandlerFunc(hostFile)
+	router.Path("/~/host/{file}.torrent").Methods("GET").HandlerFunc(hostFile)
 	router.Path("/~/buy/{file}").Methods("GET").HandlerFunc(buyFile)
 	router.Path("/~/{key}/announce").Methods("GET").HandlerFunc(handleAnnounce)
 	router.PathPrefix("/").Methods("GET").HandlerFunc(serveClient)
