@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"strconv"
@@ -68,6 +69,13 @@ func handleAnnounce(w http.ResponseWriter, r *http.Request) {
 		Peers:      []AnnounceResponsePeer{},
 	}
 
+	// build the peer object to be stored later
+	peerj, _ := json.Marshal(AnnounceResponsePeer{
+		PeerId: string(ann.PeerId[:]),
+		IP:     ann.IP.String(),
+		Port:   ann.Port,
+	})
+
 	spl := strings.Split(key, ":")
 	var id = spl[0] // can be either a saleId or a fileId
 	var sellerHash string
@@ -89,34 +97,36 @@ WHERE id = $1
 		trackerError(w, err)
 		return
 	}
-	// if we don't end above that means we have the key
-	// to be either the seller or the buyer
 
 	// is this the seller? key == fileId + hash(sellerId, secret)
 	if makeSellerHash(file.Seller) == sellerHash {
 		// this is the seller
 		// track that he is online and store a peer object to serve later to the buyer
-		peerj, _ := json.Marshal(AnnounceResponsePeer{
-			PeerId: string(ann.PeerId[:]),
-			IP:     ann.IP.String(),
-			Port:   ann.Port,
-		})
-		err := rds.Set("fm:online:"+file.Seller, string(peerj), time.Minute*30).Err()
+		err := rds.Set("fm:online:seller:"+file.Seller,
+			string(peerj), time.Minute*30).Err()
 		if err != nil {
 			log.Error().Err(err).Str("seller", file.Seller).
 				Msg("failed to save online presence")
 		}
 
 		// also store the fact that the seller was online today
-		daysPresenceKey := "fm:seed:" + file.Id
-		err = rds.HSet(daysPresenceKey, time.Now().Format("20060102"), "t").Err()
-		if err != nil {
-			log.Error().Err(err).Str("seller", file.Seller).Str("file", file.Id).
-				Msg("failed to save seller online day")
+		rds.HSet("fm:seeded:"+file.Id, time.Now().Format("20060102"), "t")
+		rds.Expire("fm:seeded:"+file.Id, time.Hour*24*90)
+
+		// if a buyer is online, tell that so the seller may attempt to connect
+		if d, err := rds.HGetAll("fm:online:buyer:" + file.Id).Result(); err == nil {
+			for _, peerj := range d {
+				var peer AnnounceResponsePeer
+				json.Unmarshal([]byte(peerj), &peer)
+
+				resp.Incomplete += 1
+				resp.Peers = append(resp.Peers, peer)
+			}
 		}
-		rds.Expire(daysPresenceKey, time.Hour*24*90)
-	} else {
-		// this is the buyer
+	} else if id != file.Id {
+		// this is the buyer: key == saleId
+		saleId := id
+
 		// if the seller is online, tell that to the buyer
 		if peerj, err := rds.Get("fm:online:" + file.Seller).Result(); err == nil {
 			// add the seller to the announcement response
@@ -126,6 +136,13 @@ WHERE id = $1
 			resp.Complete = 1
 			resp.Peers = append(resp.Peers, peer)
 		}
+
+		// track that this buyer is online so later the seller can try to connect
+		rds.HSet("fm:online:buyer:"+file.Id, saleId, string(peerj))
+		rds.Expire("fm:online:buyer:"+file.Id, time.Minute*30)
+	} else {
+		trackerError(w, errors.New("you have no access to this file."))
+		return
 	}
 
 	pretty.Log(resp)
@@ -185,8 +202,10 @@ func parseAnnounce(r *http.Request) (ann *AnnounceRequest, err error) {
 		ann.NumWant = 50
 	}
 
-	if ann.IP == nil {
-		ann.IP = net.ParseIP(r.Header.Get("X-Forwarded-For"))
+	if ann.IP == nil || isUnusableIP(ann.IP) {
+		ann.IP = net.ParseIP(
+			strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0],
+		)
 		if ann.IP == nil {
 			spl := strings.Split(r.RemoteAddr, ":")
 			remoteIP := strings.Join(spl[0:len(spl)-1], ":")
@@ -206,4 +225,17 @@ func parseBinaryParam(s string) (buf [20]byte) {
 func makeSellerHash(sellerId string) string {
 	h := sha256.Sum256([]byte(sellerId + ":" + s.SecretKey))
 	return hex.EncodeToString(h[:])
+}
+
+func isUnusableIP(ip net.IP) bool {
+	return ip.Equal(net.IPv4allsys) ||
+		ip.Equal(net.IPv4allrouter) ||
+		ip.Equal(net.IPv4zero) ||
+		ip.Equal(net.IPv4(127, 0, 0, 1)) ||
+		ip.Equal(net.IPv6zero) ||
+		ip.Equal(net.IPv6unspecified) ||
+		ip.Equal(net.IPv6loopback) ||
+		ip.Equal(net.IPv6interfacelocalallnodes) ||
+		ip.Equal(net.IPv6linklocalallnodes) ||
+		ip.Equal(net.IPv6linklocalallrouters)
 }

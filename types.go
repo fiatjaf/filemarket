@@ -63,7 +63,7 @@ func (f File) BuyerMagnet(saleId string) (string, error) {
 	}
 
 	magnet := torrent.Magnet(metadata.Name, torrent.HashInfoBytes())
-	magnet.Trackers = append(magnet.Trackers, s.ServiceURL+"/~/"+f.Id+"/announce")
+	magnet.Trackers = append(magnet.Trackers, s.ServiceURL+"/~/"+saleId+"/announce")
 
 	return magnet.String(), nil
 }
