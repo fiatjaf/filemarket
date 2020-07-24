@@ -2,7 +2,7 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -52,7 +52,7 @@ WHERE id = $1
 
 		lntx, err := lnpending.Invoice(lnpay.InvoiceParams{
 			NumSatoshis:     file.PriceMsat / 1000,
-			DescriptionHash: base64.StdEncoding.EncodeToString(h[:]),
+			DescriptionHash: hex.EncodeToString(h[:]),
 			PassThru: map[string]interface{}{
 				"file_id": file.Id,
 				"session": session,
