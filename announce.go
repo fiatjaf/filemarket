@@ -98,16 +98,29 @@ WHERE id = $1
 		return
 	}
 
-	// is this the seller? key == fileId + hash(sellerId, secret)
+	side := ""
+
 	if makeSellerHash(file.Seller) == sellerHash {
 		// this is the seller
+		side = "seller"
+	} else if id != file.Id {
+		// this is the buyer: key == saleId
+		side = "buyer"
+	}
+
+	log.Debug().Str("file", file.Id).Str("seller", file.Seller).Str("side", side).
+		Msg("announce")
+
+	// is this the seller? key == fileId + hash(sellerId, secret)
+	if side == "seller" {
 		// track that he is online and store a peer object to serve later to the buyer
-		err := rds.Set("fm:online:seller:"+file.Seller,
-			string(peerj), time.Minute*30).Err()
+		pstr := string(peerj)
+		err := rds.Set("fm:online:seller:"+file.Seller, pstr, time.Minute*30).Err()
 		if err != nil {
 			log.Error().Err(err).Str("seller", file.Seller).
 				Msg("failed to save online presence")
 		}
+		rds.Expire("fm:online:seller:"+file.Seller, time.Minute*30)
 
 		// also store the fact that the seller was online today
 		rds.HSet("fm:seeded:"+file.Id, time.Now().Format("20060102"), "t")
@@ -122,24 +135,28 @@ WHERE id = $1
 				resp.Incomplete += 1
 				resp.Peers = append(resp.Peers, peer)
 			}
+		} else {
+			log.Warn().Err(err).Msg("error fetching buyer peers")
 		}
-	} else if id != file.Id {
-		// this is the buyer: key == saleId
+	} else if side == "buyer" {
 		saleId := id
 
+		// track that this buyer is online so later the seller can try to connect
+		rds.HSet("fm:online:buyer:"+file.Id, saleId, string(peerj))
+		rds.Expire("fm:online:buyer:"+file.Id, time.Minute*30)
+
 		// if the seller is online, tell that to the buyer
-		if peerj, err := rds.Get("fm:online:" + file.Seller).Result(); err == nil {
+		if peerj, err := rds.Get("fm:online:seller:" + file.Seller).Result(); err == nil {
+			log.Print("seller " + peerj)
 			// add the seller to the announcement response
 			var peer AnnounceResponsePeer
 			json.Unmarshal([]byte(peerj), &peer)
 
 			resp.Complete = 1
 			resp.Peers = append(resp.Peers, peer)
+		} else {
+			log.Warn().Err(err).Msg("error fetching seller peer")
 		}
-
-		// track that this buyer is online so later the seller can try to connect
-		rds.HSet("fm:online:buyer:"+file.Id, saleId, string(peerj))
-		rds.Expire("fm:online:buyer:"+file.Id, time.Minute*30)
 	} else {
 		trackerError(w, errors.New("you have no access to this file."))
 		return
